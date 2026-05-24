@@ -1,33 +1,36 @@
 const fs = require('fs');
-const path = require('path');
-const glob = require('glob'); // npm install glob
+const glob = require('glob');
 
-// Recursively find all HTML files
 const htmlFiles = glob.sync('**/*.html', { ignore: 'node_modules/**' });
 
 htmlFiles.forEach(file => {
   let content = fs.readFileSync(file, 'utf8');
 
-  // 1. Remove <base href="..."> tag (any variant)
+  // 1. Remove <base> tag
   content = content.replace(/<base\s+href=["'][^"']*["']\s*\/?>/gi, '');
 
-  // 2. Fix relative paths for src, href, url(...)
-  //    Replace relative paths like "../../core/..." with "/Poterie/core/..."
-  //    This regex catches src="...", href="...", and url("...") in style attributes.
-  content = content.replace(/(?:src|href)\s*=\s*["'](\.\.\/)+/g, (match) => {
-    return match.replace(/\.\.\//g, ''); // remove all "../"
+  // 2. Add /Poterie/ to any src/href that points to a local asset
+  //    Match src="/storage/...", href="/core/...", etc.
+  content = content.replace(/((?:src|href)\s*=\s*["'])\/(?!https?:|www\.|data:|\/\/)([^"']+)/g, (match, p1, p2) => {
+    // If the path already starts with /Poterie/, leave it
+    if (p2.startsWith('Poterie/')) return match;
+    return `${p1}/Poterie/${p2}`;
   });
-  // Then prepend "/Poterie/" to those that start with core/ or sites/ or modules/
-  content = content.replace(/((?:src|href)\s*=\s*["'])(core\/|sites\/|modules\/)/g, `$1/Poterie/$2`);
-  content = content.replace(/url\(["']?(\.\.\/)+/g, (match) => {
-    return match.replace(/\.\.\//g, '');
-  });
-  content = content.replace(/url\(["']?(core\/|sites\/|modules\/)/g, `url(/Poterie/$1`);
 
-  // 3. If your CSS files are referenced with absolute paths like "/core/..." but missing "/Poterie",
-  //    add the missing prefix.
-  content = content.replace(/(?:src|href)\s*=\s*["']\/(core\/|sites\/|modules\/)/g, `$1/Poterie/$2`);
+  // 3. Fix url(...) in inline styles (e.g., background-image)
+  content = content.replace(/url\(["']?\/(?!https?:|www\.|data:|\/\/)([^"')]+)["']?\)/g, (match, p1) => {
+    if (p1.startsWith('Poterie/')) return match;
+    return `url("/Poterie/${p1}")`;
+  });
+
+  // 4. Also fix paths that are relative without leading slash (e.g., "storage/...")
+  //    but only if they are not already absolute or external
+  content = content.replace(/((?:src|href)\s*=\s*["'])(?!https?:|www\.|data:|\/\/|\/Poterie\/)([^"']+)/g, (match, p1, p2) => {
+    // Skip if it's an anchor # or javascript:
+    if (p2.startsWith('#') || p2.startsWith('javascript:')) return match;
+    return `${p1}/Poterie/${p2}`;
+  });
 
   fs.writeFileSync(file, content);
-  console.log(`Fixed: ${file}`);
+  console.log(`✅ Fixed: ${file}`);
 });
